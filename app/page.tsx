@@ -312,7 +312,7 @@ export default function ShopFlowPage() {
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-2xl border shadow-xs">
           <h1 className="text-2xl font-extrabold text-[#173B35]">
-            ShopFlow — رصيد المحل والحركة اليومية
+            ShopFlow 
           </h1>
           <div className="flex items-center gap-2 flex-wrap">
             <button
