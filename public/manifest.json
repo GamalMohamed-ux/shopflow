@@ -1,0 +1,11 @@
+{
+  "name": "ShopFlow — متابعة ميزانية المحل",
+  "short_name": "ShopFlow",
+  "description": "نظام متابعة ميزانية وحركة أموال المحل لحظياً",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#173B35",
+  "dir": "rtl",
+  "lang": "ar"
+}
