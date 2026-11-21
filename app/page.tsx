@@ -252,12 +252,21 @@ export default function ShopFlowPage() {
     URL.revokeObjectURL(url);
   };
 
+  // إجمالي الداخل والطالع للدرج وللكاش
   const totalCashIncome = transactions
     .filter((t) => t.type === "income" && t.account === "cash")
     .reduce((sum, t) => sum + t.amount, 0);
 
+  const totalCashExpense = transactions
+    .filter((t) => t.type === "expense" && t.account === "cash")
+    .reduce((sum, t) => sum + t.amount, 0);
+
   const totalVodafoneIncome = transactions
     .filter((t) => t.type === "income" && t.account === "vodafone")
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const totalVodafoneExpense = transactions
+    .filter((t) => t.type === "expense" && t.account === "vodafone")
     .reduce((sum, t) => sum + t.amount, 0);
 
   const periodTx = transactions.filter((t) => {
@@ -307,7 +316,7 @@ export default function ShopFlowPage() {
       String(tx.amount).includes(q);
     return matchesChannel && matchesQuery;
   });
-        return (
+    return (
     <div dir="rtl" className="min-h-screen bg-gray-50 text-gray-900 p-4 sm:p-6">
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-2xl border shadow-xs">
@@ -625,22 +634,36 @@ export default function ShopFlowPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border">
-            <div className="bg-white p-3.5 rounded-xl border border-emerald-100">
-              <p className="text-xs font-semibold text-gray-500">
-                مجموع اللي دخل في الدرج (+)
-              </p>
-              <p className="text-lg font-extrabold text-emerald-700 mt-1">
-                {money(totalCashIncome)}
-              </p>
+            <div className="bg-white p-4 rounded-xl border border-emerald-100 space-y-2">
+              <p className="text-xs font-bold text-emerald-800">الدرج</p>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">الداخل (+)</span>
+                <span className="font-extrabold text-green-700">
+                  {money(totalCashIncome)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">الطالع (-)</span>
+                <span className="font-extrabold text-red-700">
+                  {money(totalCashExpense)}
+                </span>
+              </div>
             </div>
 
-            <div className="bg-white p-3.5 rounded-xl border border-rose-100">
-              <p className="text-xs font-semibold text-gray-500">
-                مجموع اللي دخل في الكاش (+)
-              </p>
-              <p className="text-lg font-extrabold text-rose-700 mt-1">
-                {money(totalVodafoneIncome)}
-              </p>
+            <div className="bg-white p-4 rounded-xl border border-rose-100 space-y-2">
+              <p className="text-xs font-bold text-rose-800">الكاش</p>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">الداخل (+)</span>
+                <span className="font-extrabold text-green-700">
+                  {money(totalVodafoneIncome)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">الطالع (-)</span>
+                <span className="font-extrabold text-red-700">
+                  {money(totalVodafoneExpense)}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -721,5 +744,4 @@ export default function ShopFlowPage() {
       </div>
     </div>
   );
-              }
-                  
+}
