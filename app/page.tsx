@@ -18,11 +18,6 @@ import {
 
 type ChannelType = "cash" | "vodafone";
 
-type StoreSettings = {
-  id: number;
-  shop_balance: number;
-};
-
 type Transaction = {
   id: number;
   type: "income" | "expense";
@@ -38,21 +33,16 @@ export default function ShopFlowPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // تعديل رصيد المحل مباشرة
   const [editingBalance, setEditingBalance] = useState(false);
   const [balanceInput, setBalanceInput] = useState("0");
   const [savingBalance, setSavingBalance] = useState(false);
 
-  // نموذج إضافة حركة
   const [type, setType] = useState<"income" | "expense">("income");
   const [amount, setAmount] = useState("");
   const [channel, setChannel] = useState<ChannelType>("cash");
   const [description, setDescription] = useState("");
 
-  // فترة الإحصائيات
   const [period, setPeriod] = useState<"all" | "day" | "week" | "month">("day");
-
-  // الزرارين: فلترة الدرج والكاش (أو الكل)
   const [channelFilter, setChannelFilter] = useState<"all" | ChannelType>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -97,12 +87,12 @@ export default function ShopFlowPage() {
         txData
           .filter((t) => t.type === "income" || t.type === "expense")
           .map((t) => ({
-            id: t.id,
+            id: Number(t.id),
             type: t.type as "income" | "expense",
             amount: Number(t.amount),
             account: (t.account === "vodafone" ? "vodafone" : "cash") as ChannelType,
-            description: t.description || "",
-            date: t.date,
+            description: String(t.description || ""),
+            date: String(t.date),
           }))
       );
     }
@@ -139,24 +129,6 @@ export default function ShopFlowPage() {
       alert("من فضلك اكتب رقماً صحيحاً");
       return;
     }
-
-    setSavingBalance(true);
-
-    const { error } = await supabase
-      .from("store_settings")
-      .update({
-        shop_balance: num,
-        initial_budget: num,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-
-    if (error) {
-      alert("حصل خطأ أثناء حفظ رصيد المحل: " + error.message);
-      setSavingBalance(false);
-      return;
-    }
-
     setShopBalance(num);
     setEditingBalance(false);
     setSavingBalance(false);
@@ -240,7 +212,6 @@ export default function ShopFlowPage() {
 
     fetchData();
   };
-
   const handleExportBackup = () => {
     const backupPayload = {
       exported_at: new Date().toISOString(),
@@ -262,7 +233,6 @@ export default function ShopFlowPage() {
     URL.revokeObjectURL(url);
   };
 
-  // مجموع اللي دخل في الكاش ومجموع اللي دخل في الدرج (إجمالي الداخل في كل منهما)
   const totalCashIncome = transactions
     .filter((t) => t.type === "income" && t.account === "cash")
     .reduce((sum, t) => sum + t.amount, 0);
@@ -271,7 +241,6 @@ export default function ShopFlowPage() {
     .filter((t) => t.type === "income" && t.account === "vodafone")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  // تصفية الفترة للإحصائيات
   const periodTx = transactions.filter((t) => {
     if (period === "all") return true;
     const d = new Date(t.date);
@@ -309,7 +278,6 @@ export default function ShopFlowPage() {
     Math.round((periodExpense / maxFlow) * 100)
   );
 
-  // فلترة السجل حسب الزرارين (الدرج / الكاش / الكل) والبحث
   const visibleTransactions = transactions.filter((tx) => {
     const matchesChannel =
       channelFilter === "all" || tx.account === channelFilter;
@@ -324,7 +292,6 @@ export default function ShopFlowPage() {
   return (
     <div dir="rtl" className="min-h-screen bg-gray-50 text-gray-900 p-4 sm:p-6">
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* الهيدر */}
         <header className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-2xl border shadow-xs">
           <div>
             <h1 className="text-2xl font-extrabold text-[#173B35]">
@@ -356,7 +323,6 @@ export default function ShopFlowPage() {
           </div>
         </header>
 
-        {/* رصيد المحل فقط */}
         <section className="bg-white p-6 rounded-2xl border border-amber-200">
           <div className="flex items-center justify-between text-amber-800 text-sm font-bold">
             <span>رصيد المحل</span>
@@ -411,7 +377,6 @@ export default function ShopFlowPage() {
           )}
         </section>
 
-        {/* تسجيل حركة جديدة + الإحصائيات */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <section className="bg-white p-5 rounded-2xl border">
             <h2 className="text-lg font-bold mb-4">تسجيل حركة جديدة</h2>
@@ -497,8 +462,7 @@ export default function ShopFlowPage() {
               </button>
             </form>
           </section>
-
-          <section className="bg-white p-5 rounded-2xl border flex flex-col justify-between">
+           <section className="bg-white p-5 rounded-2xl border flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-1">
                 <h2 className="text-lg font-bold">تحليل الداخل والطالع</h2>
@@ -593,4 +557,153 @@ export default function ShopFlowPage() {
                   </div>
                 </div>
               </div>
-           
+            </div>
+
+            <p className="text-xs text-gray-400 mt-4">
+              عدد العمليات في الفترة: {periodTx.length}
+            </p>
+          </section>
+        </div>
+
+        <section className="bg-white p-5 rounded-2xl border space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-bold">حركات الدرج والكاش</h2>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setChannelFilter("all")}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold border ${
+                  channelFilter === "all"
+                    ? "bg-[#173B35] text-white border-[#173B35]"
+                    : "bg-white text-gray-700"
+                }`}
+              >
+                الكل
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setChannelFilter("cash")}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border ${
+                  channelFilter === "cash"
+                    ? "bg-emerald-700 text-white border-emerald-700"
+                    : "bg-white text-gray-700"
+                }`}
+              >
+                <Banknote className="w-4 h-4" />
+                حركات الدرج
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setChannelFilter("vodafone")}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border ${
+                  channelFilter === "vodafone"
+                    ? "bg-rose-700 text-white border-rose-700"
+                    : "bg-white text-gray-700"
+                }`}
+              >
+                <Smartphone className="w-4 h-4" />
+                حركات الكاش
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border">
+            <div className="bg-white p-3.5 rounded-xl border border-emerald-100">
+              <p className="text-xs font-semibold text-gray-500">
+                مجموع اللي دخل في الدرج (+)
+              </p>
+              <p className="text-lg font-extrabold text-emerald-700 mt-1">
+                {money(totalCashIncome)}
+              </p>
+            </div>
+
+            <div className="bg-white p-3.5 rounded-xl border border-rose-100">
+              <p className="text-xs font-semibold text-gray-500">
+                مجموع اللي دخل في الكاش (+)
+              </p>
+              <p className="text-lg font-extrabold text-rose-700 mt-1">
+                {money(totalVodafoneIncome)}
+              </p>
+            </div>
+          </div>
+
+          <div className="relative">
+            <Search className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="ابحث بملاحظة أو بمبلغ..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full border rounded-xl pr-9 pl-3 py-2 text-sm"
+            />
+          </div>
+          {visibleTransactions.length === 0 ? (
+            <p className="text-sm text-gray-500 py-6 text-center">
+              لا توجد حركات مطابقة للفلترة الحالية.
+            </p>
+          ) : (
+            <div className="divide-y">
+              {visibleTransactions.map((tx) => (
+                <div
+                  key={tx.id}
+                  className="py-3 flex items-center justify-between gap-3"
+                >
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                          tx.type === "income"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
+                      >
+                        {tx.type === "income" ? "داخل" : "طالع"}
+                      </span>
+
+                      <span className="text-xs text-gray-700 font-bold">
+                        {channelLabel(tx.account)}
+                      </span>
+
+                      <span className="text-xs text-gray-400">
+                        {new Date(tx.date).toLocaleString("ar-EG")}
+                      </span>
+                    </div>
+
+                    {tx.description && (
+                      <p className="text-sm text-gray-700 mt-1">
+                        {tx.description}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`text-sm font-extrabold ${
+                        tx.type === "income" ? "text-green-700" : "text-red-700"
+                      }`}
+                    >
+                      {tx.type === "income" ? "+" : "-"}
+                      {money(tx.amount)}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTransaction(tx)}
+                      title="حذف العملية"
+                      className="text-gray-400 hover:text-red-600 p-1"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
