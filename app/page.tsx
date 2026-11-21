@@ -129,6 +129,24 @@ export default function ShopFlowPage() {
       alert("من فضلك اكتب رقماً صحيحاً");
       return;
     }
+
+    setSavingBalance(true);
+
+    const { error } = await supabase
+      .from("store_settings")
+      .update({
+        shop_balance: num,
+        initial_budget: num,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+
+    if (error) {
+      alert("حصل خطأ أثناء حفظ رصيد المحل: " + error.message);
+      setSavingBalance(false);
+      return;
+    }
+
     setShopBalance(num);
     setEditingBalance(false);
     setSavingBalance(false);
@@ -212,6 +230,7 @@ export default function ShopFlowPage() {
 
     fetchData();
   };
+
   const handleExportBackup = () => {
     const backupPayload = {
       exported_at: new Date().toISOString(),
@@ -288,19 +307,13 @@ export default function ShopFlowPage() {
       String(tx.amount).includes(q);
     return matchesChannel && matchesQuery;
   });
-
-  return (
+        return (
     <div dir="rtl" className="min-h-screen bg-gray-50 text-gray-900 p-4 sm:p-6">
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-2xl border shadow-xs">
-          <div>
-            <h1 className="text-2xl font-extrabold text-[#173B35]">
-              ShopFlow — رصيد المحل والحركة اليومية
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              رصيد واحد للمحل مع فلترة الدرج والكاش ومجموع الداخل لكل منهما
-            </p>
-          </div>
+          <h1 className="text-2xl font-extrabold text-[#173B35]">
+            ShopFlow — رصيد المحل والحركة اليومية
+          </h1>
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
@@ -462,7 +475,8 @@ export default function ShopFlowPage() {
               </button>
             </form>
           </section>
-           <section className="bg-white p-5 rounded-2xl border flex flex-col justify-between">
+
+          <section className="bg-white p-5 rounded-2xl border flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-1">
                 <h2 className="text-lg font-bold">تحليل الداخل والطالع</h2>
@@ -640,6 +654,7 @@ export default function ShopFlowPage() {
               className="w-full border rounded-xl pr-9 pl-3 py-2 text-sm"
             />
           </div>
+
           {visibleTransactions.length === 0 ? (
             <p className="text-sm text-gray-500 py-6 text-center">
               لا توجد حركات مطابقة للفلترة الحالية.
@@ -706,4 +721,5 @@ export default function ShopFlowPage() {
       </div>
     </div>
   );
-}
+              }
+                  
