@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  Wallet,
+  Store,
   ArrowDownLeft,
   ArrowUpRight,
   ArrowLeftRight,
@@ -14,11 +14,14 @@ import {
   BarChart3,
   Download,
   Search,
+  Pencil,
 } from "lucide-react";
+
+type AccountKey = "shop" | "cash" | "vodafone";
 
 type StoreSettings = {
   id: number;
-  initial_budget: number;
+  shop_balance: number;
   cash_balance: number;
   vodafone_balance: number;
 };
@@ -27,8 +30,8 @@ type Transaction = {
   id: number;
   type: "income" | "expense" | "transfer";
   amount: number;
-  account: "cash" | "vodafone";
-  to_account: "cash" | "vodafone" | null;
+  account: AccountKey;
+  to_account: AccountKey | null;
   description: string;
   date: string;
 };
@@ -36,24 +39,25 @@ type Transaction = {
 export default function ShopFlowPage() {
   const [settings, setSettings] = useState<StoreSettings>({
     id: 1,
-    initial_budget: 100000,
-    cash_balance: 100000,
+    shop_balance: 0,
+    cash_balance: 0,
     vodafone_balance: 0,
   });
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // تعديل مباشر لأي رصيد من التلاتة
+  const [editingField, setEditingField] = useState<AccountKey | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
   // نموذج إضافة حركة
   const [type, setType] = useState<"income" | "expense" | "transfer">("income");
   const [amount, setAmount] = useState("");
-  const [account, setAccount] = useState<"cash" | "vodafone">("cash");
-  const [toAccount, setToAccount] = useState<"cash" | "vodafone">("vodafone");
+  const [account, setAccount] = useState<AccountKey>("cash");
+  const [toAccount, setToAccount] = useState<AccountKey>("vodafone");
   const [description, setDescription] = useState("");
-
-  // تعديل الميزانية الافتتاحية
-  const [budgetInput, setBudgetInput] = useState("100000");
-  const [editingBudget, setEditingBudget] = useState(false);
 
   // فلتر التقارير وتحليل البيانات
   const [period, setPeriod] = useState<"all" | "day" | "week" | "month">("day");
@@ -66,6 +70,13 @@ export default function ShopFlowPage() {
 
   const money = (value: number) =>
     new Intl.NumberFormat("ar-EG").format(Number(value || 0)) + " جنيه";
+
+  const accountLabel = (acc: AccountKey | null) => {
+    if (acc === "shop") return "رصيد المحل";
+    if (acc === "cash") return "الدرج (كاش)";
+    if (acc === "vodafone") return "فودافون كاش";
+    return "";
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -82,11 +93,10 @@ export default function ShopFlowPage() {
     if (settingsData) {
       setSettings({
         id: settingsData.id,
-        initial_budget: Number(settingsData.initial_budget),
-        cash_balance: Number(settingsData.cash_balance),
-        vodafone_balance: Number(settingsData.vodafone_balance),
+        shop_balance: Number(settingsData.shop_balance ?? settingsData.initial_budget ?? 0),
+        cash_balance: Number(settingsData.cash_balance ?? 0),
+        vodafone_balance: Number(settingsData.vodafone_balance ?? 0),
       });
-      setBudgetInput(String(settingsData.initial_budget));
     }
 
     const { data: txData, error: txErr } = await supabase
@@ -103,6 +113,8 @@ export default function ShopFlowPage() {
         txData.map((t) => ({
           ...t,
           amount: Number(t.amount),
+          account: (t.account as AccountKey) || "cash",
+          to_account: (t.to_account as AccountKey | null) || null,
         }))
       );
     }
@@ -131,26 +143,62 @@ export default function ShopFlowPage() {
     };
   }, []);
 
-  const handleSaveBudget = async (e: React.FormEvent) => {
+  const startEditing = (key: AccountKey, currentVal: number) => {
+    setEditingField(key);
+    setEditValue(String(currentVal));
+  };
+
+  const handleSaveDirectBalance = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numBudget = Number(budgetInput);
-    if (Number.isNaN(numBudget) || numBudget < 0) return;
+    if (!editingField) return;
 
-    const { error } = await supabase
-      .from("store_settings")
-      .update({
-        initial_budget: numBudget,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-
-    if (error) {
-      alert("حصل خطأ أثناء حفظ الميزانية: " + error.message);
+    const num = Number(editValue);
+    if (Number.isNaN(num)) {
+      alert("من فضلك اكتب رقماً صحيحاً");
       return;
     }
 
-    setEditingBudget(false);
-    fetchData();
+    setSavingEdit(true);
+
+    const payload: Record<string, number | string> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (editingField === "shop") {
+      payload.shop_balance = num;
+      payload.initial_budget = num;
+    } else if (editingField === "cash") {
+      payload.cash_balance = num;
+    } else if (editingField === "vodafone") {
+      payload.vodafone_balance = num;
+    }
+
+    const { error } = await supabase
+      .from("store_settings")
+      .update(payload)
+      .eq("id", 1);
+
+    if (error) {
+      alert("حصل خطأ أثناء حفظ الرصيد: " + error.message);
+      setSavingEdit(false);
+      return;
+    }
+
+    setEditingField(null);
+    setEditValue("");
+    await fetchData();
+    setSavingEdit(false);
+  };
+
+  const applyBalanceDelta = (
+    current: { shop: number; cash: number; vodafone: number },
+    acc: AccountKey,
+    delta: number
+  ) => {
+    return {
+      ...current,
+      [acc]: current[acc] + delta,
+    };
   };
 
   const handleAddTransaction = async (e: React.FormEvent) => {
@@ -165,23 +213,19 @@ export default function ShopFlowPage() {
 
     setSubmitting(true);
 
-    let newCash = settings.cash_balance;
-    let newVodafone = settings.vodafone_balance;
+    let nextBalances = {
+      shop: settings.shop_balance,
+      cash: settings.cash_balance,
+      vodafone: settings.vodafone_balance,
+    };
 
     if (type === "income") {
-      if (account === "cash") newCash += numAmount;
-      else newVodafone += numAmount;
+      nextBalances = applyBalanceDelta(nextBalances, account, numAmount);
     } else if (type === "expense") {
-      if (account === "cash") newCash -= numAmount;
-      else newVodafone -= numAmount;
+      nextBalances = applyBalanceDelta(nextBalances, account, -numAmount);
     } else if (type === "transfer") {
-      if (account === "cash") {
-        newCash -= numAmount;
-        newVodafone += numAmount;
-      } else {
-        newVodafone -= numAmount;
-        newCash += numAmount;
-      }
+      nextBalances = applyBalanceDelta(nextBalances, account, -numAmount);
+      nextBalances = applyBalanceDelta(nextBalances, toAccount, numAmount);
     }
 
     const { error: txError } = await supabase.from("transactions").insert({
@@ -202,8 +246,10 @@ export default function ShopFlowPage() {
     const { error: settingsError } = await supabase
       .from("store_settings")
       .update({
-        cash_balance: newCash,
-        vodafone_balance: newVodafone,
+        shop_balance: nextBalances.shop,
+        cash_balance: nextBalances.cash,
+        vodafone_balance: nextBalances.vodafone,
+        initial_budget: nextBalances.shop,
         updated_at: new Date().toISOString(),
       })
       .eq("id", 1);
@@ -220,27 +266,23 @@ export default function ShopFlowPage() {
 
   const handleDeleteTransaction = async (tx: Transaction) => {
     const confirmed = window.confirm(
-      `هل أنت متأكد من حذف هذه العملية بقيمة ${money(tx.amount)}؟ سيتم تعديل الرصيد تلقائياً.`
+      `هل أنت متأكد من حذف هذه العملية بقيمة ${money(tx.amount)}؟ سيتم إرجاع الرصيد تلقائياً.`
     );
     if (!confirmed) return;
 
-    let restoredCash = settings.cash_balance;
-    let restoredVodafone = settings.vodafone_balance;
+    let restored = {
+      shop: settings.shop_balance,
+      cash: settings.cash_balance,
+      vodafone: settings.vodafone_balance,
+    };
 
     if (tx.type === "income") {
-      if (tx.account === "cash") restoredCash -= tx.amount;
-      else restoredVodafone -= tx.amount;
+      restored = applyBalanceDelta(restored, tx.account, -tx.amount);
     } else if (tx.type === "expense") {
-      if (tx.account === "cash") restoredCash += tx.amount;
-      else restoredVodafone += tx.amount;
+      restored = applyBalanceDelta(restored, tx.account, tx.amount);
     } else if (tx.type === "transfer" && tx.to_account) {
-      if (tx.account === "cash") {
-        restoredCash += tx.amount;
-        restoredVodafone -= tx.amount;
-      } else {
-        restoredVodafone += tx.amount;
-        restoredCash -= tx.amount;
-      }
+      restored = applyBalanceDelta(restored, tx.account, tx.amount);
+      restored = applyBalanceDelta(restored, tx.to_account, -tx.amount);
     }
 
     const { error: delError } = await supabase
@@ -256,8 +298,10 @@ export default function ShopFlowPage() {
     const { error: updError } = await supabase
       .from("store_settings")
       .update({
-        cash_balance: restoredCash,
-        vodafone_balance: restoredVodafone,
+        shop_balance: restored.shop,
+        cash_balance: restored.cash,
+        vodafone_balance: restored.vodafone,
+        initial_budget: restored.shop,
         updated_at: new Date().toISOString(),
       })
       .eq("id", 1);
@@ -290,9 +334,8 @@ export default function ShopFlowPage() {
     URL.revokeObjectURL(url);
   };
 
-  // الإجماليات والفرق عن الميزانية
-  const currentTotalBalance = settings.cash_balance + settings.vodafone_balance;
-  const budgetDifference = currentTotalBalance - settings.initial_budget;
+  const totalBalance =
+    settings.shop_balance + settings.cash_balance + settings.vodafone_balance;
 
   // تصفية التقارير حسب الفترة
   const filteredTx = transactions.filter((t) => {
@@ -329,7 +372,7 @@ export default function ShopFlowPage() {
     .filter((t) => t.type === "expense")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const periodNet = periodIncome - periodExpense;
+  const periodDiff = periodIncome - periodExpense;
   const maxFlow = Math.max(periodIncome, periodExpense, 1);
   const incomePercent = Math.min(100, Math.round((periodIncome / maxFlow) * 100));
   const expensePercent = Math.min(
@@ -337,21 +380,79 @@ export default function ShopFlowPage() {
     Math.round((periodExpense / maxFlow) * 100)
   );
 
-  // فلترة وبحث سجل الحركات
   const visibleTransactions = transactions.filter((tx) => {
     const matchesType = txTypeFilter === "all" || tx.type === txTypeFilter;
     const q = searchQuery.trim().toLowerCase();
     const matchesQuery =
       !q ||
       tx.description.toLowerCase().includes(q) ||
-      String(tx.amount).includes(q);
+      String(tx.amount).includes(q) ||
+      accountLabel(tx.account).toLowerCase().includes(q);
     return matchesType && matchesQuery;
   });
 
-  const accountLabel = (acc: "cash" | "vodafone" | null) => {
-    if (acc === "cash") return "الدرج (كاش)";
-    if (acc === "vodafone") return "فودافون كاش";
-    return "";
+  const renderEditableCard = (
+    key: AccountKey,
+    title: string,
+    subtitle: string,
+    value: number,
+    icon: React.ReactNode,
+    borderClass: string,
+    titleClass: string
+  ) => {
+    const isEditing = editingField === key;
+
+    return (
+      <div className={`bg-white p-5 rounded-2xl border ${borderClass}`}>
+        <div className={`flex items-center justify-between text-sm font-bold ${titleClass}`}>
+          <span>{title}</span>
+          {icon}
+        </div>
+
+        {isEditing ? (
+          <form onSubmit={handleSaveDirectBalance} className="mt-3 flex gap-2">
+            <input
+              type="number"
+              step="0.01"
+              autoFocus
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              className="w-full border rounded-xl px-3 py-1.5 text-sm font-bold text-gray-900"
+            />
+            <button
+              type="submit"
+              disabled={savingEdit}
+              className="bg-[#173B35] text-white px-3 py-1.5 rounded-xl text-xs font-bold shrink-0"
+            >
+              {savingEdit ? "..." : "حفظ"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingField(null)}
+              className="border px-2.5 py-1.5 rounded-xl text-xs font-semibold text-gray-600 shrink-0"
+            >
+              إلغاء
+            </button>
+          </form>
+        ) : (
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-2xl font-extrabold text-gray-900">
+              {money(value)}
+            </p>
+            <button
+              type="button"
+              onClick={() => startEditing(key, value)}
+              className="flex items-center gap-1 text-xs text-[#173B35] bg-gray-100 hover:bg-gray-200 px-2.5 py-1.5 rounded-lg font-bold shrink-0"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              تعديل
+            </button>
+          </div>
+        )}
+
+        <p className="text-xs text-gray-500 mt-1.5">{subtitle}</p>
+      </div>
+    );
   };
 
   return (
@@ -361,10 +462,10 @@ export default function ShopFlowPage() {
         <header className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-2xl border shadow-xs">
           <div>
             <h1 className="text-2xl font-extrabold text-[#173B35]">
-              ShopFlow — متابعة ميزانية المحل
+              ShopFlow — متابعة أرصدة وحركة المحل
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              حساب الميزانية، الداخل والطالع، التحويلات، وتحليل البيانات لحظياً
+              عدّل أرصدتك مباشرة، وسجّل الداخل والطالع والتحويلات لحظياً
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -389,103 +490,55 @@ export default function ShopFlowPage() {
           </div>
         </header>
 
-        {/* كروت الميزانية وإجمالي الرصيد */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white p-5 rounded-2xl border">
-            <div className="flex items-center justify-between text-gray-500 text-sm">
-              <span>الميزانية الافتتاحية</span>
-              <Wallet className="w-4 h-4 text-[#173B35]" />
-            </div>
-            {editingBudget ? (
-              <form onSubmit={handleSaveBudget} className="mt-3 flex gap-2">
-                <input
-                  type="number"
-                  value={budgetInput}
-                  onChange={(e) => setBudgetInput(e.target.value)}
-                  className="w-full border rounded-lg px-2 py-1 text-sm font-bold"
-                />
-                <button
-                  type="submit"
-                  className="bg-[#173B35] text-white px-3 py-1 rounded-lg text-xs font-bold"
-                >
-                  حفظ
-                </button>
-              </form>
-            ) : (
-              <div className="mt-2 flex items-center justify-between">
-                <p className="text-xl font-extrabold text-gray-900">
-                  {money(settings.initial_budget)}
-                </p>
-                <button
-                  onClick={() => setEditingBudget(true)}
-                  className="text-xs text-[#173B35] underline font-semibold"
-                >
-                  تعديل
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border">
-            <span className="text-gray-500 text-sm">إجمالي الرصيد الحالي</span>
-            <p className="text-xl font-extrabold text-[#173B35] mt-2">
-              {money(currentTotalBalance)}
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              مجموع الدرج وفودافون كاش معاً
+        {/* إجمالي الرصيد الكلي */}
+        <section className="bg-white p-5 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <span className="text-sm font-bold text-gray-500">
+              إجمالي الرصيد الكلي الآن
+            </span>
+            <p className="text-3xl font-extrabold text-[#173B35] mt-1">
+              {money(totalBalance)}
             </p>
           </div>
-
-          <div className="bg-white p-5 rounded-2xl border">
-            <span className="text-gray-500 text-sm">الفرق عن الميزانية</span>
-            <p
-              className={`text-xl font-extrabold mt-2 ${
-                budgetDifference >= 0 ? "text-green-700" : "text-red-700"
-              }`}
-            >
-              {budgetDifference >= 0 ? "+" : ""}
-              {money(budgetDifference)}
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              {budgetDifference > 0
-                ? "الميزانية زادت عن البداية"
-                : budgetDifference < 0
-                ? "الميزانية أقل من البداية"
-                : "مساوية للميزانية الافتتاحية"}
-            </p>
-          </div>
+          <p className="text-xs text-gray-500">
+            مجموع (رصيد المحل + الدرج كاش + فودافون كاش) — اضغط «تعديل» على أي رصيد لتغييره مباشرة
+          </p>
         </section>
 
-        {/* كروت فصل الدرج (كاش) وفودافون كاش */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="bg-white p-5 rounded-2xl border border-emerald-200">
-            <div className="flex items-center justify-between text-emerald-800 text-sm font-bold">
-              <span>رصيد الدرج (كاش)</span>
-              <Banknote className="w-5 h-5" />
-            </div>
-            <p className="text-2xl font-extrabold text-gray-900 mt-2">
-              {money(settings.cash_balance)}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              النقدية المتاحة داخل المحل
-            </p>
-          </div>
+        {/* الكروت التلاتة القابلة للتعديل المباشر */}
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {renderEditableCard(
+            "shop",
+            "رصيد المحل",
+            "الرصيد المخصص للمحل / البضاعة",
+            settings.shop_balance,
+            <Store className="w-5 h-5" />,
+            "border-amber-200",
+            "text-amber-800"
+          )}
 
-          <div className="bg-white p-5 rounded-2xl border border-rose-200">
-            <div className="flex items-center justify-between text-rose-700 text-sm font-bold">
-              <span>رصيد فودافون كاش</span>
-              <Smartphone className="w-5 h-5" />
-            </div>
-            <p className="text-2xl font-extrabold text-gray-900 mt-2">
-              {money(settings.vodafone_balance)}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              الرصيد المتاح على المحفظة الإلكترونية
-            </p>
-          </div>
+          {renderEditableCard(
+            "cash",
+            "رصيد الدرج (كاش)",
+            "النقدية المتاحة في الدرج",
+            settings.cash_balance,
+            <Banknote className="w-5 h-5" />,
+            "border-emerald-200",
+            "text-emerald-800"
+          )}
+
+          {renderEditableCard(
+            "vodafone",
+            "رصيد فودافون كاش",
+            "الرصيد المتاح على التليفون / المحفظة",
+            settings.vodafone_balance,
+            <Smartphone className="w-5 h-5" />,
+            "border-rose-200",
+            "text-rose-700"
+          )}
         </section>
 
-        {/* إضافة حركة جديدة + تحليل البيانات والإحصائيات */}
+        {/* تسجيل حركة جديدة + تحليل البيانات والزيادة/النقص */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* نموذج تسجيل حركة */}
           <section className="bg-white p-5 rounded-2xl border">
@@ -554,13 +607,12 @@ export default function ShopFlowPage() {
                   </label>
                   <select
                     value={account}
-                    onChange={(e) =>
-                      setAccount(e.target.value as "cash" | "vodafone")
-                    }
+                    onChange={(e) => setAccount(e.target.value as AccountKey)}
                     className="w-full border rounded-xl px-3 py-2 text-sm bg-white"
                   >
                     <option value="cash">الدرج (كاش)</option>
                     <option value="vodafone">فودافون كاش</option>
+                    <option value="shop">رصيد المحل</option>
                   </select>
                 </div>
               </div>
@@ -572,13 +624,12 @@ export default function ShopFlowPage() {
                   </label>
                   <select
                     value={toAccount}
-                    onChange={(e) =>
-                      setToAccount(e.target.value as "cash" | "vodafone")
-                    }
+                    onChange={(e) => setToAccount(e.target.value as AccountKey)}
                     className="w-full border rounded-xl px-3 py-2 text-sm bg-white"
                   >
                     <option value="vodafone">فودافون كاش</option>
                     <option value="cash">الدرج (كاش)</option>
+                    <option value="shop">رصيد المحل</option>
                   </select>
                 </div>
               )}
@@ -589,7 +640,7 @@ export default function ShopFlowPage() {
                 </label>
                 <input
                   type="text"
-                  placeholder="مثال: مبيعات الصباح، شراء بضاعة، تحويل..."
+                  placeholder="مثال: بضاعة، مبيعات، تحويل..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full border rounded-xl px-3 py-2 text-sm"
@@ -606,16 +657,15 @@ export default function ShopFlowPage() {
             </form>
           </section>
 
-          {/* شاشة تحليل البيانات والإحصائيات (الداخل والطالع) */}
+          {/* شاشة تحليل البيانات والزيادة أو النقص */}
           <section className="bg-white p-5 rounded-2xl border flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-1">
-                <h2 className="text-lg font-bold">تحليل البيانات والإحصائيات</h2>
+                <h2 className="text-lg font-bold">تحليل البيانات (زيادة / نقص)</h2>
                 <BarChart3 className="w-5 h-5 text-[#173B35]" />
               </div>
               <p className="text-xs text-gray-500 mb-4">
-                مقارنة الداخل والطالع والصافي خلال الفترة المحددة (التحويلات بين
-                الحسابات لا تُحسب كربح أو خسارة)
+                يحسب اللي دخل واللي طلع وهل في زيادة أو نقص خلال الفترة المختارة
               </p>
 
               <div className="grid grid-cols-4 gap-2 mb-5">
@@ -644,32 +694,38 @@ export default function ShopFlowPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
                 <div className="bg-green-50 p-4 rounded-xl">
-                  <p className="text-xs text-gray-600">الداخل (المكسب/الإيراد)</p>
+                  <p className="text-xs text-gray-600">الداخل (+)</p>
                   <p className="text-base font-extrabold text-green-700 mt-1">
                     {money(periodIncome)}
                   </p>
                 </div>
 
                 <div className="bg-red-50 p-4 rounded-xl">
-                  <p className="text-xs text-gray-600">الطالع (المصروف/الخارج)</p>
+                  <p className="text-xs text-gray-600">الطالع (-)</p>
                   <p className="text-base font-extrabold text-red-700 mt-1">
                     {money(periodExpense)}
                   </p>
                 </div>
 
                 <div className="bg-gray-100 p-4 rounded-xl">
-                  <p className="text-xs text-gray-600">صافي الفترة</p>
+                  <p className="text-xs text-gray-600">
+                    {periodDiff > 0
+                      ? "زيادة (+)"
+                      : periodDiff < 0
+                      ? "نقص (-)"
+                      : "متعادل"}
+                  </p>
                   <p
                     className={`text-base font-extrabold mt-1 ${
-                      periodNet >= 0 ? "text-green-700" : "text-red-700"
+                      periodDiff >= 0 ? "text-green-700" : "text-red-700"
                     }`}
                   >
-                    {money(periodNet)}
+                    {periodDiff > 0 ? "+" : ""}
+                    {money(periodDiff)}
                   </p>
                 </div>
               </div>
 
-              {/* مقارنة بصرية للداخل والطالع */}
               <div className="space-y-3 bg-gray-50 p-4 rounded-xl border">
                 <div>
                   <div className="flex justify-between text-xs font-bold mb-1">
@@ -741,7 +797,7 @@ export default function ShopFlowPage() {
             <Search className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="ابحث بملاحظة أو بمبلغ..."
+              placeholder="ابحث بملاحظة، حساب، أو مبلغ..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full border rounded-xl pr-9 pl-3 py-2 text-sm"
