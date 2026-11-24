@@ -251,7 +251,7 @@ export default function NetBalanceTrackerPage() {
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <section className="lg:col-span-7 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm">
+          <section className="lg:col-span-6 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm">
             <h2 className="text-base sm:text-lg font-extrabold text-slate-900 mb-4">
               حسبة جديدة
             </h2>
@@ -352,7 +352,7 @@ export default function NetBalanceTrackerPage() {
             </form>
           </section>
 
-          <section className="lg:col-span-5 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col justify-between">
+          <section className="lg:col-span-6 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
@@ -369,38 +369,40 @@ export default function NetBalanceTrackerPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">
-                      الحسبة الأولى
-                    </label>
-                    <select
-                      value={firstId}
-                      onChange={(e) => setFirstId(Number(e.target.value))}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800"
-                    >
-                      {snapshots.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">
+                        الحسبة الأولى
+                      </label>
+                      <select
+                        value={firstId}
+                        onChange={(e) => setFirstId(Number(e.target.value))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3 py-2.5 text-xs font-bold text-slate-800"
+                      >
+                        {snapshots.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">
-                      الحسبة الثانية
-                    </label>
-                    <select
-                      value={secondId}
-                      onChange={(e) => setSecondId(Number(e.target.value))}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800"
-                    >
-                      {snapshots.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
-                        </option>
-                      ))}
-                    </select>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">
+                        الحسبة الثانية
+                      </label>
+                      <select
+                        value={secondId}
+                        onChange={(e) => setSecondId(Number(e.target.value))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3 py-2.5 text-xs font-bold text-slate-800"
+                      >
+                        {snapshots.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   <button
@@ -413,22 +415,24 @@ export default function NetBalanceTrackerPage() {
                   </button>
 
                   {comparedPair && (
-                    <div className="space-y-2 bg-slate-50 rounded-2xl p-3.5 border border-slate-200/70 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 font-bold">الفرق في النتيجة</span>
-                        <span
-                          className={`text-sm font-black ${
-                            (netDiff ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
-                          }`}
-                        >
-                          {formatSignedMoney(netDiff ?? 0)}
-                        </span>
+                    <div className="space-y-2.5 bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 text-xs">
+                      <div className="grid grid-cols-4 gap-2 font-extrabold text-slate-500 pb-1.5 border-b border-slate-200">
+                        <span>البند</span>
+                        <span>الأولى</span>
+                        <span>الثانية</span>
+                        <span>الفرق</span>
                       </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-200/70">
-                        <span className="text-slate-500 font-bold">اللي معاك</span>
+                      <div className="grid grid-cols-4 gap-2 items-center">
+                        <span className="font-bold text-slate-700">اللي معاك</span>
+                        <span className="font-bold text-slate-800">
+                          {formatMoney(comparedPair.first.has_amount)}
+                        </span>
+                        <span className="font-bold text-slate-800">
+                          {formatMoney(comparedPair.second.has_amount)}
+                        </span>
                         <span
-                          className={`font-extrabold ${
+                          className={`font-black ${
                             (hasDiff ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
                           }`}
                         >
@@ -436,10 +440,16 @@ export default function NetBalanceTrackerPage() {
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-200/70">
-                        <span className="text-slate-500 font-bold">اللي ليك</span>
+                      <div className="grid grid-cols-4 gap-2 items-center pt-1.5 border-t border-slate-200/70">
+                        <span className="font-bold text-slate-700">اللي ليك</span>
+                        <span className="font-bold text-slate-800">
+                          {formatMoney(comparedPair.first.receivable_amount)}
+                        </span>
+                        <span className="font-bold text-slate-800">
+                          {formatMoney(comparedPair.second.receivable_amount)}
+                        </span>
                         <span
-                          className={`font-extrabold ${
+                          className={`font-black ${
                             (receivableDiff ?? 0) >= 0 ? "text-sky-700" : "text-rose-700"
                           }`}
                         >
@@ -447,14 +457,37 @@ export default function NetBalanceTrackerPage() {
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-200/70">
-                        <span className="text-slate-500 font-bold">اللي عليك</span>
+                      <div className="grid grid-cols-4 gap-2 items-center pt-1.5 border-t border-slate-200/70">
+                        <span className="font-bold text-slate-700">اللي عليك</span>
+                        <span className="font-bold text-slate-800">
+                          {formatMoney(comparedPair.first.owed_amount)}
+                        </span>
+                        <span className="font-bold text-slate-800">
+                          {formatMoney(comparedPair.second.owed_amount)}
+                        </span>
                         <span
-                          className={`font-extrabold ${
+                          className={`font-black ${
                             (owedDiff ?? 0) <= 0 ? "text-emerald-700" : "text-rose-700"
                           }`}
                         >
                           {formatSignedMoney(owedDiff ?? 0)}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-2 items-center pt-2 border-t border-slate-200">
+                        <span className="font-extrabold text-slate-900">النتيجة</span>
+                        <span className="font-extrabold text-slate-900">
+                          {formatSignedMoney(comparedPair.first.net_amount)}
+                        </span>
+                        <span className="font-extrabold text-slate-900">
+                          {formatSignedMoney(comparedPair.second.net_amount)}
+                        </span>
+                        <span
+                          className={`font-black ${
+                            (netDiff ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
+                          }`}
+                        >
+                          {formatSignedMoney(netDiff ?? 0)}
                         </span>
                       </div>
                     </div>
