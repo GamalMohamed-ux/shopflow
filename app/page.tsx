@@ -13,6 +13,8 @@ import {
   RefreshCw,
   GitCompare,
   Layers,
+  Calendar,
+  X,
 } from "lucide-react";
 
 type Snapshot = {
@@ -41,6 +43,10 @@ export default function NetBalanceTrackerPage() {
     second: Snapshot;
   } | null>(null);
 
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState("");
+
   const hasNum = Number(hasInput) || 0;
   const receivableNum = Number(receivableInput) || 0;
   const owedNum = Number(owedInput) || 0;
@@ -49,7 +55,7 @@ export default function NetBalanceTrackerPage() {
   const formatMoney = (val: number) =>
     new Intl.NumberFormat("ar-EG", {
       maximumFractionDigits: 2,
-    }).format(Number(val || 0)) + " جنيه";
+    }).format(Math.abs(Number(val || 0))) + " جنيه";
 
   const formatSignedMoney = (val: number) => {
     const absText = new Intl.NumberFormat("ar-EG", {
@@ -101,10 +107,10 @@ export default function NetBalanceTrackerPage() {
 
       if (parsed.length >= 2) {
         setFirstId((prev) =>
-          prev === "" || !parsed.some((p) => p.id === prev) ? parsed[0].id : prev
+          prev === "" || !parsed.some((p) => p.id === prev) ? parsed[1].id : prev
         );
         setSecondId((prev) =>
-          prev === "" || !parsed.some((p) => p.id === prev) ? parsed[1].id : prev
+          prev === "" || !parsed.some((p) => p.id === prev) ? parsed[0].id : prev
         );
       } else if (parsed.length === 1) {
         setFirstId(parsed[0].id);
@@ -188,7 +194,10 @@ export default function NetBalanceTrackerPage() {
       return;
     }
 
-    if (comparedPair && (comparedPair.first.id === id || comparedPair.second.id === id)) {
+    if (
+      comparedPair &&
+      (comparedPair.first.id === id || comparedPair.second.id === id)
+    ) {
       setComparedPair(null);
     }
 
@@ -207,21 +216,58 @@ export default function NetBalanceTrackerPage() {
     setComparedPair({ first, second });
   };
 
-  const netDiff = comparedPair
-    ? comparedPair.first.net_amount - comparedPair.second.net_amount
+  const orderedPair = comparedPair
+    ? new Date(comparedPair.first.created_at).getTime() <=
+      new Date(comparedPair.second.created_at).getTime()
+      ? { earlier: comparedPair.first, later: comparedPair.second }
+      : { earlier: comparedPair.second, later: comparedPair.first }
     : null;
 
-  const hasDiff = comparedPair
-    ? comparedPair.first.has_amount - comparedPair.second.has_amount
+  const combinedNet = orderedPair
+    ? orderedPair.earlier.net_amount + orderedPair.later.net_amount
     : null;
 
-  const receivableDiff = comparedPair
-    ? comparedPair.first.receivable_amount - comparedPair.second.receivable_amount
+  const netStepChange = orderedPair
+    ? orderedPair.later.net_amount - orderedPair.earlier.net_amount
     : null;
 
-  const owedDiff = comparedPair
-    ? comparedPair.first.owed_amount - comparedPair.second.owed_amount
+  const hasStepChange = orderedPair
+    ? orderedPair.later.has_amount - orderedPair.earlier.has_amount
     : null;
+
+  const receivableStepChange = orderedPair
+    ? orderedPair.later.receivable_amount - orderedPair.earlier.receivable_amount
+    : null;
+
+  const owedStepChange = orderedPair
+    ? orderedPair.later.owed_amount - orderedPair.earlier.owed_amount
+    : null;
+
+  const filteredSnapshots = snapshots.filter((item) => {
+    const d = new Date(item.created_at);
+    if (Number.isNaN(d.getTime())) return true;
+
+    if (selectedMonth) {
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}`;
+      if (ym !== selectedMonth) return false;
+    }
+
+    if (fromDate) {
+      const start = new Date(`${fromDate}T00:00:00`);
+      if (d < start) return false;
+    }
+
+    if (toDate) {
+      const end = new Date(`${toDate}T23:59:59.999`);
+      if (d > end) return false;
+    }
+
+    return true;
+  });
+
   return (
     <div
       dir="rtl"
@@ -244,7 +290,9 @@ export default function NetBalanceTrackerPage() {
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-bold text-slate-700 transition"
           >
             <RefreshCw
-              className={`w-4 h-4 ${loading ? "animate-spin text-emerald-600" : ""}`}
+              className={`w-4 h-4 ${
+                loading ? "animate-spin text-emerald-600" : ""
+              }`}
             />
             تحديث
           </button>
@@ -381,7 +429,8 @@ export default function NetBalanceTrackerPage() {
                       >
                         {snapshots.map((s) => (
                           <option key={s.id} value={s.id}>
-                            {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
+                            {formatDate(s.created_at)} —{" "}
+                            {formatSignedMoney(s.net_amount)}
                           </option>
                         ))}
                       </select>
@@ -398,7 +447,8 @@ export default function NetBalanceTrackerPage() {
                       >
                         {snapshots.map((s) => (
                           <option key={s.id} value={s.id}>
-                            {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
+                            {formatDate(s.created_at)} —{" "}
+                            {formatSignedMoney(s.net_amount)}
                           </option>
                         ))}
                       </select>
@@ -414,80 +464,103 @@ export default function NetBalanceTrackerPage() {
                     مقارنة
                   </button>
 
-                  {comparedPair && (
+                  {orderedPair && (
                     <div className="space-y-2.5 bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 text-xs">
                       <div className="grid grid-cols-4 gap-2 font-extrabold text-slate-500 pb-1.5 border-b border-slate-200">
                         <span>البند</span>
-                        <span>الأولى</span>
-                        <span>الثانية</span>
-                        <span>الفرق</span>
+                        <span>الأقدم</span>
+                        <span>الأحدث</span>
+                        <span>التغير</span>
                       </div>
 
                       <div className="grid grid-cols-4 gap-2 items-center">
                         <span className="font-bold text-slate-700">اللي معاك</span>
                         <span className="font-bold text-slate-800">
-                          {formatMoney(comparedPair.first.has_amount)}
+                          {formatMoney(orderedPair.earlier.has_amount)}
                         </span>
                         <span className="font-bold text-slate-800">
-                          {formatMoney(comparedPair.second.has_amount)}
+                          {formatMoney(orderedPair.later.has_amount)}
                         </span>
                         <span
                           className={`font-black ${
-                            (hasDiff ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
+                            (hasStepChange ?? 0) >= 0
+                              ? "text-emerald-700"
+                              : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(hasDiff ?? 0)}
+                          {formatSignedMoney(hasStepChange ?? 0)}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-4 gap-2 items-center pt-1.5 border-t border-slate-200/70">
                         <span className="font-bold text-slate-700">اللي ليك</span>
                         <span className="font-bold text-slate-800">
-                          {formatMoney(comparedPair.first.receivable_amount)}
+                          {formatMoney(orderedPair.earlier.receivable_amount)}
                         </span>
                         <span className="font-bold text-slate-800">
-                          {formatMoney(comparedPair.second.receivable_amount)}
+                          {formatMoney(orderedPair.later.receivable_amount)}
                         </span>
                         <span
                           className={`font-black ${
-                            (receivableDiff ?? 0) >= 0 ? "text-sky-700" : "text-rose-700"
+                            (receivableStepChange ?? 0) >= 0
+                              ? "text-sky-700"
+                              : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(receivableDiff ?? 0)}
+                          {formatSignedMoney(receivableStepChange ?? 0)}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-4 gap-2 items-center pt-1.5 border-t border-slate-200/70">
                         <span className="font-bold text-slate-700">اللي عليك</span>
                         <span className="font-bold text-slate-800">
-                          {formatMoney(comparedPair.first.owed_amount)}
+                          {formatMoney(orderedPair.earlier.owed_amount)}
                         </span>
                         <span className="font-bold text-slate-800">
-                          {formatMoney(comparedPair.second.owed_amount)}
+                          {formatMoney(orderedPair.later.owed_amount)}
                         </span>
                         <span
                           className={`font-black ${
-                            (owedDiff ?? 0) <= 0 ? "text-emerald-700" : "text-rose-700"
+                            (owedStepChange ?? 0) <= 0
+                              ? "text-emerald-700"
+                              : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(owedDiff ?? 0)}
+                          {formatSignedMoney(owedStepChange ?? 0)}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-4 gap-2 items-center pt-2 border-t border-slate-200">
                         <span className="font-extrabold text-slate-900">النتيجة</span>
                         <span className="font-extrabold text-slate-900">
-                          {formatSignedMoney(comparedPair.first.net_amount)}
+                          {formatSignedMoney(orderedPair.earlier.net_amount)}
                         </span>
                         <span className="font-extrabold text-slate-900">
-                          {formatSignedMoney(comparedPair.second.net_amount)}
+                          {formatSignedMoney(orderedPair.later.net_amount)}
                         </span>
                         <span
                           className={`font-black ${
-                            (netDiff ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
+                            (netStepChange ?? 0) >= 0
+                              ? "text-emerald-700"
+                              : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(netDiff ?? 0)}
+                          {formatSignedMoney(netStepChange ?? 0)}
+                        </span>
+                      </div>
+
+                      <div className="pt-2.5 mt-1 border-t border-slate-200 flex items-center justify-between">
+                        <span className="font-extrabold text-slate-700">
+                          مجموع الحسبتين
+                        </span>
+                        <span
+                          className={`text-sm font-black ${
+                            (combinedNet ?? 0) >= 0
+                              ? "text-emerald-700"
+                              : "text-rose-700"
+                          }`}
+                        >
+                          {formatSignedMoney(combinedNet ?? 0)}
                         </span>
                       </div>
                     </div>
@@ -503,20 +576,75 @@ export default function NetBalanceTrackerPage() {
         </div>
 
         <section className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2">
-            <History className="w-5 h-5 text-slate-700" />
-            <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
-              السجل
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <History className="w-5 h-5 text-slate-700" />
+              <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
+                السجل
+              </h2>
+            </div>
+
+            {(fromDate || toDate || selectedMonth) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFromDate("");
+                  setToDate("");
+                  setSelectedMonth("");
+                }}
+                className="inline-flex items-center gap-1 text-xs font-bold text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-xl transition"
+              >
+                <X className="w-3.5 h-3.5" />
+                مسح التاريخ
+              </button>
+            )}
           </div>
 
-          {snapshots.length === 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/70">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                شهر محدد
+              </label>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                من تاريخ
+              </label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                إلى تاريخ
+              </label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800"
+              />
+            </div>
+          </div>
+
+          {filteredSnapshots.length === 0 ? (
             <p className="text-sm text-slate-500 py-8 text-center">
-              لا توجد سجلات بعد.
+              لا توجد سجلات في هذا الوقت.
             </p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {snapshots.map((item) => {
+              {filteredSnapshots.map((item) => {
                 const isNegative = item.net_amount < 0;
                 const isPositive = item.net_amount > 0;
 
@@ -526,11 +654,10 @@ export default function NetBalanceTrackerPage() {
                     className="rounded-2xl border border-slate-200/90 bg-slate-50/50 hover:bg-white p-4 transition shadow-2xs flex flex-col justify-between gap-3"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-bold text-slate-500">
-                          {formatDate(item.created_at)}
-                        </p>
-                      </div>
+                      <p className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                        <Calendar className="w-3.5 h-3.5" />
+                        {formatDate(item.created_at)}
+                      </p>
 
                       <button
                         type="button"
