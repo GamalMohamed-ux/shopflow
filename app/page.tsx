@@ -30,12 +30,16 @@ export default function NetBalanceTrackerPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [title, setTitle] = useState("");
   const [hasInput, setHasInput] = useState("");
   const [receivableInput, setReceivableInput] = useState("");
   const [owedInput, setOwedInput] = useState("");
 
-  const [compareId, setCompareId] = useState<number | "">("");
+  const [firstId, setFirstId] = useState<number | "">("");
+  const [secondId, setSecondId] = useState<number | "">("");
+  const [comparedPair, setComparedPair] = useState<{
+    first: Snapshot;
+    second: Snapshot;
+  } | null>(null);
 
   const hasNum = Number(hasInput) || 0;
   const receivableNum = Number(receivableInput) || 0;
@@ -92,15 +96,22 @@ export default function NetBalanceTrackerPage() {
           created_at: String(row.created_at),
         };
       });
+
       setSnapshots(parsed);
-      if (parsed.length > 1) {
-        setCompareId((prev) =>
+
+      if (parsed.length >= 2) {
+        setFirstId((prev) =>
+          prev === "" || !parsed.some((p) => p.id === prev) ? parsed[0].id : prev
+        );
+        setSecondId((prev) =>
           prev === "" || !parsed.some((p) => p.id === prev) ? parsed[1].id : prev
         );
       } else if (parsed.length === 1) {
-        setCompareId(parsed[0].id);
+        setFirstId(parsed[0].id);
+        setSecondId("");
       } else {
-        setCompareId("");
+        setFirstId("");
+        setSecondId("");
       }
     }
     setLoading(false);
@@ -136,15 +147,13 @@ export default function NetBalanceTrackerPage() {
 
     setSaving(true);
     const computedNet = hasNum + receivableNum - owedNum;
-    const finalTitle =
-      title.trim() ||
-      `سجل ${new Date().toLocaleDateString("ar-EG", {
-        day: "numeric",
-        month: "short",
-      })}`;
+    const autoLabel = new Date().toLocaleDateString("ar-EG", {
+      day: "numeric",
+      month: "short",
+    });
 
     const { error } = await supabase.from("balance_snapshots").insert({
-      title: finalTitle,
+      title: `حسبة ${autoLabel}`,
       has_amount: hasNum,
       receivable_amount: receivableNum,
       owed_amount: owedNum,
@@ -158,7 +167,6 @@ export default function NetBalanceTrackerPage() {
       return;
     }
 
-    setTitle("");
     setHasInput("");
     setReceivableInput("");
     setOwedInput("");
@@ -179,39 +187,47 @@ export default function NetBalanceTrackerPage() {
       alert("حصل خطأ أثناء الحذف: " + error.message);
       return;
     }
+
+    if (comparedPair && (comparedPair.first.id === id || comparedPair.second.id === id)) {
+      setComparedPair(null);
+    }
+
     fetchSnapshots();
   };
 
-  const latestSnapshot = snapshots[0] || null;
-  const comparedSnapshot =
-    snapshots.find((s) => s.id === Number(compareId)) || null;
+  const handleRunComparison = () => {
+    const first = snapshots.find((s) => s.id === Number(firstId));
+    const second = snapshots.find((s) => s.id === Number(secondId));
 
-  const netChangeBetween =
-    latestSnapshot && comparedSnapshot
-      ? latestSnapshot.net_amount - comparedSnapshot.net_amount
-      : null;
+    if (!first || !second) {
+      alert("اختر الحسبة الأولى والحسبة الثانية الأول");
+      return;
+    }
 
-  const hasChangeBetween =
-    latestSnapshot && comparedSnapshot
-      ? latestSnapshot.has_amount - comparedSnapshot.has_amount
-      : null;
+    setComparedPair({ first, second });
+  };
 
-  const receivableChangeBetween =
-    latestSnapshot && comparedSnapshot
-      ? latestSnapshot.receivable_amount - comparedSnapshot.receivable_amount
-      : null;
+  const netDiff = comparedPair
+    ? comparedPair.first.net_amount - comparedPair.second.net_amount
+    : null;
 
-  const owedChangeBetween =
-    latestSnapshot && comparedSnapshot
-      ? latestSnapshot.owed_amount - comparedSnapshot.owed_amount
-      : null;
+  const hasDiff = comparedPair
+    ? comparedPair.first.has_amount - comparedPair.second.has_amount
+    : null;
+
+  const receivableDiff = comparedPair
+    ? comparedPair.first.receivable_amount - comparedPair.second.receivable_amount
+    : null;
+
+  const owedDiff = comparedPair
+    ? comparedPair.first.owed_amount - comparedPair.second.owed_amount
+    : null;
   return (
     <div
       dir="rtl"
       className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white text-slate-900 p-4 sm:p-7"
     >
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* الهيدر المختصر */}
         <header className="bg-white/95 border border-slate-200/80 rounded-3xl px-5 py-4 shadow-sm flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-slate-950 via-slate-800 to-emerald-700 text-white flex items-center justify-center shadow-sm">
@@ -234,7 +250,6 @@ export default function NetBalanceTrackerPage() {
           </button>
         </header>
 
-        {/* الحاسبة والمقارنة */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <section className="lg:col-span-7 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm">
             <h2 className="text-base sm:text-lg font-extrabold text-slate-900 mb-4">
@@ -242,14 +257,6 @@ export default function NetBalanceTrackerPage() {
             </h2>
 
             <form onSubmit={handleSaveSnapshot} className="space-y-4">
-              <input
-                type="text"
-                placeholder="عنوان الحسبة (اختياري)"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:border-slate-900 focus:outline-none px-4 py-2.5 text-sm font-semibold transition"
-              />
-
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-3.5">
                   <label className="flex items-center justify-between text-xs font-extrabold text-emerald-800 mb-2">
@@ -345,7 +352,6 @@ export default function NetBalanceTrackerPage() {
             </form>
           </section>
 
-          {/* مقارنة الفترات */}
           <section className="lg:col-span-5 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-4">
@@ -362,31 +368,60 @@ export default function NetBalanceTrackerPage() {
                   </p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <select
-                    value={compareId}
-                    onChange={(e) => setCompareId(Number(e.target.value))}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800"
-                  >
-                    {snapshots.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.title} — {formatSignedMoney(s.net_amount)}
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                      الحسبة الأولى
+                    </label>
+                    <select
+                      value={firstId}
+                      onChange={(e) => setFirstId(Number(e.target.value))}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800"
+                    >
+                      {snapshots.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                  {latestSnapshot && comparedSnapshot && (
-                    <div className="space-y-2.5 bg-slate-50 rounded-2xl p-4 border border-slate-200/70 text-xs">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                      الحسبة الثانية
+                    </label>
+                    <select
+                      value={secondId}
+                      onChange={(e) => setSecondId(Number(e.target.value))}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800"
+                    >
+                      {snapshots.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {formatDate(s.created_at)} — {formatSignedMoney(s.net_amount)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleRunComparison}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 px-4 text-sm font-extrabold transition"
+                  >
+                    <GitCompare className="w-4 h-4" />
+                    مقارنة
+                  </button>
+
+                  {comparedPair && (
+                    <div className="space-y-2 bg-slate-50 rounded-2xl p-3.5 border border-slate-200/70 text-xs">
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-500 font-bold">النتيجة</span>
+                        <span className="text-slate-500 font-bold">الفرق في النتيجة</span>
                         <span
                           className={`text-sm font-black ${
-                            (netChangeBetween ?? 0) >= 0
-                              ? "text-emerald-700"
-                              : "text-rose-700"
+                            (netDiff ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(netChangeBetween ?? 0)}
+                          {formatSignedMoney(netDiff ?? 0)}
                         </span>
                       </div>
 
@@ -394,12 +429,10 @@ export default function NetBalanceTrackerPage() {
                         <span className="text-slate-500 font-bold">اللي معاك</span>
                         <span
                           className={`font-extrabold ${
-                            (hasChangeBetween ?? 0) >= 0
-                              ? "text-emerald-700"
-                              : "text-rose-700"
+                            (hasDiff ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(hasChangeBetween ?? 0)}
+                          {formatSignedMoney(hasDiff ?? 0)}
                         </span>
                       </div>
 
@@ -407,12 +440,10 @@ export default function NetBalanceTrackerPage() {
                         <span className="text-slate-500 font-bold">اللي ليك</span>
                         <span
                           className={`font-extrabold ${
-                            (receivableChangeBetween ?? 0) >= 0
-                              ? "text-sky-700"
-                              : "text-rose-700"
+                            (receivableDiff ?? 0) >= 0 ? "text-sky-700" : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(receivableChangeBetween ?? 0)}
+                          {formatSignedMoney(receivableDiff ?? 0)}
                         </span>
                       </div>
 
@@ -420,12 +451,10 @@ export default function NetBalanceTrackerPage() {
                         <span className="text-slate-500 font-bold">اللي عليك</span>
                         <span
                           className={`font-extrabold ${
-                            (owedChangeBetween ?? 0) <= 0
-                              ? "text-emerald-700"
-                              : "text-rose-700"
+                            (owedDiff ?? 0) <= 0 ? "text-emerald-700" : "text-rose-700"
                           }`}
                         >
-                          {formatSignedMoney(owedChangeBetween ?? 0)}
+                          {formatSignedMoney(owedDiff ?? 0)}
                         </span>
                       </div>
                     </div>
@@ -440,7 +469,6 @@ export default function NetBalanceTrackerPage() {
           </section>
         </div>
 
-        {/* السجل المحفوظ */}
         <section className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2">
             <History className="w-5 h-5 text-slate-700" />
@@ -466,10 +494,7 @@ export default function NetBalanceTrackerPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <h3 className="text-base font-extrabold text-slate-900">
-                          {item.title || "سجل"}
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-0.5">
+                        <p className="text-xs font-bold text-slate-500">
                           {formatDate(item.created_at)}
                         </p>
                       </div>
