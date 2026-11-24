@@ -3,741 +3,521 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  Store,
-  ArrowDownLeft,
-  ArrowUpRight,
+  Wallet,
+  HandCoins,
+  Scale,
+  Save,
+  History,
   Trash2,
   RefreshCw,
-  BarChart3,
-  Download,
-  Search,
-  Pencil,
-  Banknote,
-  Smartphone,
+  GitCompare,
+  Calendar,
+  Sparkles,
 } from "lucide-react";
 
-type ChannelType = "cash" | "vodafone";
-
-type Transaction = {
+type Snapshot = {
   id: number;
-  type: "income" | "expense";
-  amount: number;
-  account: ChannelType;
-  description: string;
-  date: string;
+  title: string;
+  has_amount: number;
+  owed_amount: number;
+  net_amount: number;
+  created_at: string;
 };
 
-export default function ShopFlowPage() {
-  const [shopBalance, setShopBalance] = useState<number>(0);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+export default function NetBalanceTrackerPage() {
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [editingBalance, setEditingBalance] = useState(false);
-  const [balanceInput, setBalanceInput] = useState("0");
-  const [savingBalance, setSavingBalance] = useState(false);
+  const [title, setTitle] = useState("");
+  const [hasInput, setHasInput] = useState("");
+  const [owedInput, setOwedInput] = useState("");
 
-  const [type, setType] = useState<"income" | "expense">("income");
-  const [amount, setAmount] = useState("");
-  const [channel, setChannel] = useState<ChannelType>("cash");
-  const [description, setDescription] = useState("");
+  const [compareId, setCompareId] = useState<number | "">("");
 
-  const [period, setPeriod] = useState<"all" | "day" | "week" | "month">("day");
-  const [channelFilter, setChannelFilter] = useState<"all" | ChannelType>("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const hasNum = Number(hasInput) || 0;
+  const owedNum = Number(owedInput) || 0;
+  const liveNet = hasNum - owedNum;
 
-  const money = (value: number) =>
-    new Intl.NumberFormat("ar-EG").format(Number(value || 0)) + " جنيه";
+  const formatMoney = (val: number) =>
+    new Intl.NumberFormat("ar-EG", {
+      maximumFractionDigits: 2,
+    }).format(Number(val || 0)) + " جنيه";
 
-  const channelLabel = (ch: ChannelType) =>
-    ch === "cash" ? "الدرج" : "كاش";
+  const formatSignedMoney = (val: number) => {
+    const absText = new Intl.NumberFormat("ar-EG", {
+      maximumFractionDigits: 2,
+    }).format(Math.abs(Number(val || 0)));
+    if (val > 0) return `+${absText} جنيه`;
+    if (val < 0) return `-${absText} جنيه`;
+    return `0 جنيه`;
+  };
 
-  const fetchData = async () => {
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString("ar-EG", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  };
+
+  const fetchSnapshots = async () => {
     setLoading(true);
-
-    const { data: settingsData, error: settingsErr } = await supabase
-      .from("store_settings")
+    const { data, error } = await supabase
+      .from("balance_snapshots")
       .select("*")
-      .eq("id", 1)
-      .single();
+      .order("created_at", { ascending: false });
 
-    if (settingsErr) {
-      console.error("Error fetching settings:", settingsErr.message);
+    if (error) {
+      console.error("Error fetching snapshots:", error.message);
+    } else if (data) {
+      const parsed: Snapshot[] = data.map((row) => ({
+        id: Number(row.id),
+        title: String(row.title || ""),
+        has_amount: Number(row.has_amount || 0),
+        owed_amount: Number(row.owed_amount || 0),
+        net_amount: Number(row.net_amount || 0),
+        created_at: String(row.created_at),
+      }));
+      setSnapshots(parsed);
+      if (parsed.length > 1) {
+        setCompareId((prev) =>
+          prev === "" || !parsed.some((p) => p.id === prev) ? parsed[1].id : prev
+        );
+      } else if (parsed.length === 1) {
+        setCompareId(parsed[0].id);
+      } else {
+        setCompareId("");
+      }
     }
-
-    if (settingsData) {
-      const currentShop = Number(
-        settingsData.shop_balance ?? settingsData.initial_budget ?? 0
-      );
-      setShopBalance(currentShop);
-      setBalanceInput(String(currentShop));
-    }
-
-    const { data: txData, error: txErr } = await supabase
-      .from("transactions")
-      .select("*")
-      .order("date", { ascending: false });
-
-    if (txErr) {
-      console.error("Error fetching transactions:", txErr.message);
-    }
-
-    if (txData) {
-      setTransactions(
-        txData
-          .filter((t) => t.type === "income" || t.type === "expense")
-          .map((t) => ({
-            id: Number(t.id),
-            type: t.type as "income" | "expense",
-            amount: Number(t.amount),
-            account: (t.account === "vodafone" ? "vodafone" : "cash") as ChannelType,
-            description: String(t.description || ""),
-            date: String(t.date),
-          }))
-      );
-    }
-
     setLoading(false);
   };
 
   useEffect(() => {
-    fetchData();
+    fetchSnapshots();
 
-    const channelSub = supabase
-      .channel("shopflow-simple-realtime")
+    const sub = supabase
+      .channel("snapshots-realtime")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "transactions" },
-        () => fetchData()
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "store_settings" },
-        () => fetchData()
+        { event: "*", schema: "public", table: "balance_snapshots" },
+        () => fetchSnapshots()
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channelSub);
+      supabase.removeChannel(sub);
     };
   }, []);
 
-  const handleSaveShopBalance = async (e: React.FormEvent) => {
+  const handleSaveSnapshot = async (e: React.FormEvent) => {
     e.preventDefault();
-    const num = Number(balanceInput);
-    if (Number.isNaN(num)) {
-      alert("من فضلك اكتب رقماً صحيحاً");
+    if (hasInput.trim() === "" && owedInput.trim() === "") {
+      alert("اكتب الفلوس اللي معاك أو اللي عليك الأول");
       return;
     }
 
-    setSavingBalance(true);
+    setSaving(true);
+    const computedNet = hasNum - owedNum;
+    const finalTitle =
+      title.trim() ||
+      `حسبة ${new Date().toLocaleDateString("ar-EG", {
+        day: "numeric",
+        month: "short",
+      })}`;
 
-    const { error } = await supabase
-      .from("store_settings")
-      .update({
-        shop_balance: num,
-        initial_budget: num,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
+    const { error } = await supabase.from("balance_snapshots").insert({
+      title: finalTitle,
+      has_amount: hasNum,
+      owed_amount: owedNum,
+      net_amount: computedNet,
+      created_at: new Date().toISOString(),
+    });
 
     if (error) {
-      alert("حصل خطأ أثناء حفظ رصيد المحل: " + error.message);
-      setSavingBalance(false);
+      alert("حصل خطأ أثناء الحفظ: " + error.message);
+      setSaving(false);
       return;
     }
 
-    setShopBalance(num);
-    setEditingBalance(false);
-    setSavingBalance(false);
+    setTitle("");
+    setHasInput("");
+    setOwedInput("");
+    await fetchSnapshots();
+    setSaving(false);
   };
 
-  const handleAddTransaction = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const numAmount = Number(amount);
-    if (!numAmount || numAmount <= 0) return;
+  const handleDelete = async (id: number) => {
+    const ok = window.confirm("هل تريد حذف هذه الحسبة المحفوظة؟");
+    if (!ok) return;
 
-    setSubmitting(true);
-
-    const nextShopBalance =
-      type === "income" ? shopBalance + numAmount : shopBalance - numAmount;
-
-    const { error: txError } = await supabase.from("transactions").insert({
-      type,
-      amount: numAmount,
-      account: channel,
-      to_account: null,
-      description: description.trim(),
-      date: new Date().toISOString(),
-    });
-
-    if (txError) {
-      alert("حصل خطأ أثناء حفظ الحركة: " + txError.message);
-      setSubmitting(false);
-      return;
-    }
-
-    const { error: settingsError } = await supabase
-      .from("store_settings")
-      .update({
-        shop_balance: nextShopBalance,
-        initial_budget: nextShopBalance,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-
-    if (settingsError) {
-      alert("الحركة اتحفظت بس تحديث رصيد المحل فيه مشكلة: " + settingsError.message);
-    }
-
-    setAmount("");
-    setDescription("");
-    await fetchData();
-    setSubmitting(false);
-  };
-
-  const handleDeleteTransaction = async (tx: Transaction) => {
-    const confirmed = window.confirm(
-      `هل أنت متأكد من حذف هذه العملية بقيمة ${money(tx.amount)}؟ سيتم تعديل رصيد المحل تلقائياً.`
-    );
-    if (!confirmed) return;
-
-    const restoredBalance =
-      tx.type === "income" ? shopBalance - tx.amount : shopBalance + tx.amount;
-
-    const { error: delError } = await supabase
-      .from("transactions")
+    const { error } = await supabase
+      .from("balance_snapshots")
       .delete()
-      .eq("id", tx.id);
+      .eq("id", id);
 
-    if (delError) {
-      alert("حصل خطأ أثناء حذف العملية: " + delError.message);
+    if (error) {
+      alert("حصل خطأ أثناء الحذف: " + error.message);
       return;
     }
-
-    const { error: updError } = await supabase
-      .from("store_settings")
-      .update({
-        shop_balance: restoredBalance,
-        initial_budget: restoredBalance,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-
-    if (updError) {
-      alert("تم حذف العملية بس تحديث الرصيد فيه مشكلة: " + updError.message);
-    }
-
-    fetchData();
+    fetchSnapshots();
   };
 
-  const handleExportBackup = () => {
-    const backupPayload = {
-      exported_at: new Date().toISOString(),
-      shop_balance: shopBalance,
-      transactions,
-    };
+  const latestSnapshot = snapshots[0] || null;
+  const comparedSnapshot =
+    snapshots.find((s) => s.id === Number(compareId)) || null;
 
-    const blob = new Blob([JSON.stringify(backupPayload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const dayStamp = new Date().toISOString().slice(0, 10);
-    link.href = url;
-    link.download = `shopflow-backup-${dayStamp}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
+  const netChangeBetween =
+    latestSnapshot && comparedSnapshot
+      ? latestSnapshot.net_amount - comparedSnapshot.net_amount
+      : null;
 
-  // إجمالي الداخل والطالع للدرج وللكاش
-  const totalCashIncome = transactions
-    .filter((t) => t.type === "income" && t.account === "cash")
-    .reduce((sum, t) => sum + t.amount, 0);
+  const hasChangeBetween =
+    latestSnapshot && comparedSnapshot
+      ? latestSnapshot.has_amount - comparedSnapshot.has_amount
+      : null;
 
-  const totalCashExpense = transactions
-    .filter((t) => t.type === "expense" && t.account === "cash")
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalVodafoneIncome = transactions
-    .filter((t) => t.type === "income" && t.account === "vodafone")
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalVodafoneExpense = transactions
-    .filter((t) => t.type === "expense" && t.account === "vodafone")
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const periodTx = transactions.filter((t) => {
-    if (period === "all") return true;
-    const d = new Date(t.date);
-    if (Number.isNaN(d.getTime())) return false;
-
-    const now = new Date(Date.now());
-    if (period === "day") {
-      return d.toDateString() === now.toDateString();
-    }
-    if (period === "week") {
-      const start = new Date(now);
-      const day = start.getDay();
-      const diff = day === 0 ? 6 : day - 1;
-      start.setDate(start.getDate() - diff);
-      start.setHours(0, 0, 0, 0);
-      return d >= start && d <= now;
-    }
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    return d >= startOfMonth && d <= now;
-  });
-
-  const periodIncome = periodTx
-    .filter((t) => t.type === "income")
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const periodExpense = periodTx
-    .filter((t) => t.type === "expense")
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const periodDiff = periodIncome - periodExpense;
-  const maxFlow = Math.max(periodIncome, periodExpense, 1);
-  const incomePercent = Math.min(100, Math.round((periodIncome / maxFlow) * 100));
-  const expensePercent = Math.min(
-    100,
-    Math.round((periodExpense / maxFlow) * 100)
-  );
-
-  const visibleTransactions = transactions.filter((tx) => {
-    const matchesChannel =
-      channelFilter === "all" || tx.account === channelFilter;
-    const q = searchQuery.trim().toLowerCase();
-    const matchesQuery =
-      !q ||
-      tx.description.toLowerCase().includes(q) ||
-      String(tx.amount).includes(q);
-    return matchesChannel && matchesQuery;
-  });
-    return (
-    <div dir="rtl" className="min-h-screen bg-gray-50 text-gray-900 p-4 sm:p-6">
+  const owedChangeBetween =
+    latestSnapshot && comparedSnapshot
+      ? latestSnapshot.owed_amount - comparedSnapshot.owed_amount
+      : null;
+  return (
+    <div
+      dir="rtl"
+      className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white text-slate-900 p-4 sm:p-7"
+    >
       <div className="max-w-5xl mx-auto space-y-6">
-        <header className="flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-2xl border shadow-xs">
-          <h1 className="text-2xl font-extrabold text-[#173B35]">
-            ShopFlow 
-          </h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={handleExportBackup}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#173B35] text-white text-sm font-semibold hover:opacity-95"
-            >
-              <Download className="w-4 h-4" />
-              نسخة احتياطية
-            </button>
-            <button
-              type="button"
-              onClick={fetchData}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold hover:bg-gray-50"
-            >
-              <RefreshCw
-                className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
-              />
-              تحديث
-            </button>
+        {/* الهيدر */}
+        <header className="bg-white/90 backdrop-blur border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-sm">
+              <Sparkles className="w-6 h-6 text-emerald-400" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
+                ميزان الحسابات — حفظ ومقارنة الفترات
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                احسب اللي معاك واللي عليك، احفظ كل حسبة، وقارن بين الأسابيع والشهور
+              </p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={fetchSnapshots}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-bold text-slate-700 transition"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${loading ? "animate-spin text-emerald-600" : ""}`}
+            />
+            تحديث
+          </button>
         </header>
 
-        <section className="bg-white p-6 rounded-2xl border border-amber-200">
-          <div className="flex items-center justify-between text-amber-800 text-sm font-bold">
-            <span>رصيد المحل</span>
-            <Store className="w-5 h-5" />
-          </div>
-
-          {editingBalance ? (
-            <form
-              onSubmit={handleSaveShopBalance}
-              className="mt-3 flex flex-wrap gap-2 max-w-md"
-            >
-              <input
-                type="number"
-                step="0.01"
-                autoFocus
-                value={balanceInput}
-                onChange={(e) => setBalanceInput(e.target.value)}
-                className="flex-1 min-w-[150px] border rounded-xl px-3 py-2 text-base font-bold text-gray-900"
-              />
-              <button
-                type="submit"
-                disabled={savingBalance}
-                className="bg-[#173B35] text-white px-4 py-2 rounded-xl text-sm font-bold"
-              >
-                {savingBalance ? "جاري الحفظ..." : "حفظ"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingBalance(false)}
-                className="border px-3 py-2 rounded-xl text-sm font-semibold text-gray-600"
-              >
-                إلغاء
-              </button>
-            </form>
-          ) : (
-            <div className="mt-2 flex items-center justify-between gap-3">
-              <p className="text-3xl font-extrabold text-gray-900">
-                {money(shopBalance)}
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setBalanceInput(String(shopBalance));
-                  setEditingBalance(true);
-                }}
-                className="flex items-center gap-1.5 text-xs text-[#173B35] bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-xl font-bold"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                تعديل الرصيد
-              </button>
+        {/* الحاسبة الفورية + نتيجة الصافي */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* إدخال وحفظ الحسبة */}
+          <section className="lg:col-span-7 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-extrabold text-slate-900">
+                حسبة جديدة وحفظ (Save)
+              </h2>
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-600">
+                حفظ تلقائي للسجل
+              </span>
             </div>
-          )}
-        </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="bg-white p-5 rounded-2xl border">
-            <h2 className="text-lg font-bold mb-4">تسجيل حركة جديدة</h2>
-            <form onSubmit={handleAddTransaction} className="space-y-4">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setType("income")}
-                  className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border ${
-                    type === "income"
-                      ? "bg-green-700 text-white border-green-700"
-                      : "bg-white text-gray-700"
-                  }`}
-                >
-                  <ArrowDownLeft className="w-4 h-4" />
-                  داخل (+)
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setType("expense")}
-                  className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border ${
-                    type === "expense"
-                      ? "bg-red-700 text-white border-red-700"
-                      : "bg-white text-gray-700"
-                  }`}
-                >
-                  <ArrowUpRight className="w-4 h-4" />
-                  طالع (-)
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">
-                    المبلغ (جنيه)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="مثال: 500"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full border rounded-xl px-3 py-2 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">
-                    النوع / المكان
-                  </label>
-                  <select
-                    value={channel}
-                    onChange={(e) => setChannel(e.target.value as ChannelType)}
-                    className="w-full border rounded-xl px-3 py-2 text-sm bg-white"
-                  >
-                    <option value="cash">الدرج</option>
-                    <option value="vodafone">كاش</option>
-                  </select>
-                </div>
-              </div>
-
+            <form onSubmit={handleSaveSnapshot} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  ملاحظة / بيان (اختياري)
+                <label className="block text-xs font-bold text-slate-600 mb-1.5">
+                  اسم أو وصف الحسبة (اختياري)
                 </label>
                 <input
                   type="text"
-                  placeholder="مثال: مبيعات، شراء بضاعة..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2 text-sm"
+                  placeholder="مثال: جرد الأسبوع الأول، تقفيل شهر نوفمبر..."
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 focus:bg-white focus:border-slate-900 focus:outline-none px-4 py-2.5 text-sm font-medium transition"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-4">
+                  <label className="flex items-center justify-between text-xs font-extrabold text-emerald-800 mb-2">
+                    <span>الفلوس اللي معاك</span>
+                    <Wallet className="w-4 h-4 text-emerald-600" />
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    value={hasInput}
+                    onChange={(e) => setHasInput(e.target.value)}
+                    className="w-full rounded-xl border border-emerald-200 bg-white focus:border-emerald-600 focus:outline-none px-3.5 py-2.5 text-base font-extrabold text-slate-900"
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-rose-200/80 bg-rose-50/40 p-4">
+                  <label className="flex items-center justify-between text-xs font-extrabold text-rose-800 mb-2">
+                    <span>الفلوس اللي عليك</span>
+                    <HandCoins className="w-4 h-4 text-rose-600" />
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    value={owedInput}
+                    onChange={(e) => setOwedInput(e.target.value)}
+                    className="w-full rounded-xl border border-rose-200 bg-white focus:border-rose-600 focus:outline-none px-3.5 py-2.5 text-base font-extrabold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              {/* معاينة النتيجة قبل الحفظ */}
+              <div
+                className={`rounded-2xl p-4 border flex items-center justify-between gap-3 ${
+                  liveNet < 0
+                    ? "bg-rose-50 border-rose-200"
+                    : liveNet > 0
+                    ? "bg-emerald-50 border-emerald-200"
+                    : "bg-slate-50 border-slate-200"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Scale
+                    className={`w-5 h-5 ${
+                      liveNet < 0
+                        ? "text-rose-600"
+                        : liveNet > 0
+                        ? "text-emerald-600"
+                        : "text-slate-500"
+                    }`}
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-600">
+                      نتيجة الحسبة الآن
+                    </p>
+                    <p className="text-xs font-semibold text-slate-500 mt-0.5">
+                      {liveNet < 0
+                        ? `عليك عجز / ناقص ${formatMoney(Math.abs(liveNet))}`
+                        : liveNet > 0
+                        ? `معاك فائض / زيادة ${formatMoney(liveNet)}`
+                        : "الحساب متعادل (0)"}
+                    </p>
+                  </div>
+                </div>
+
+                <p
+                  className={`text-xl sm:text-2xl font-black ${
+                    liveNet < 0
+                      ? "text-rose-700"
+                      : liveNet > 0
+                      ? "text-emerald-700"
+                      : "text-slate-700"
+                  }`}
+                >
+                  {formatSignedMoney(liveNet)}
+                </p>
               </div>
 
               <button
                 type="submit"
-                disabled={submitting}
-                className="w-full bg-[#173B35] text-white py-2.5 rounded-xl font-bold text-sm hover:opacity-95 disabled:opacity-50"
+                disabled={saving}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white py-3.5 px-5 text-sm font-extrabold shadow-sm transition disabled:opacity-50"
               >
-                {submitting ? "جاري الحفظ..." : "حفظ الحركة"}
+                <Save className="w-4 h-4 text-emerald-400" />
+                {saving ? "جاري الحفظ..." : "حفظ الحسبة (Save)"}
               </button>
             </form>
           </section>
 
-          <section className="bg-white p-5 rounded-2xl border flex flex-col justify-between">
+          {/* مقارنة الفترات */}
+          <section className="lg:col-span-5 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="text-lg font-bold">تحليل الداخل والطالع</h2>
-                <BarChart3 className="w-5 h-5 text-[#173B35]" />
-              </div>
-              <p className="text-xs text-gray-500 mb-4">
-                متابعة الداخل والطالع والفرق (زيادة أو نقص) حسب الفترة
-              </p>
-
-              <div className="grid grid-cols-4 gap-2 mb-5">
-                {[
-                  { key: "day", label: "اليوم" },
-                  { key: "week", label: "الأسبوع" },
-                  { key: "month", label: "الشهر" },
-                  { key: "all", label: "الكل" },
-                ].map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() =>
-                      setPeriod(item.key as "all" | "day" | "week" | "month")
-                    }
-                    className={`py-2 rounded-xl text-xs font-bold border ${
-                      period === item.key
-                        ? "bg-[#173B35] text-white border-[#173B35]"
-                        : "bg-white text-gray-700"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  مقارنة بين فترتين
+                </h2>
+                <GitCompare className="w-5 h-5 text-indigo-600" />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-                <div className="bg-green-50 p-4 rounded-xl">
-                  <p className="text-xs text-gray-600">الداخل (+)</p>
-                  <p className="text-base font-extrabold text-green-700 mt-1">
-                    {money(periodIncome)}
+              {snapshots.length < 2 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-6 text-center space-y-2 my-4">
+                  <p className="text-sm font-bold text-slate-700">
+                    احفظ حسبتين على الأقل عشان تقارن بينهم
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    مثلاً حسبة الأسبوع ده مع الأسبوع اللي فات، أو الشهر ده مع الشهر اللي فات.
                   </p>
                 </div>
-
-                <div className="bg-red-50 p-4 rounded-xl">
-                  <p className="text-xs text-gray-600">الطالع (-)</p>
-                  <p className="text-base font-extrabold text-red-700 mt-1">
-                    {money(periodExpense)}
-                  </p>
-                </div>
-
-                <div className="bg-gray-100 p-4 rounded-xl">
-                  <p className="text-xs text-gray-600">
-                    {periodDiff > 0
-                      ? "زيادة (+)"
-                      : periodDiff < 0
-                      ? "نقص (-)"
-                      : "متعادل"}
-                  </p>
-                  <p
-                    className={`text-base font-extrabold mt-1 ${
-                      periodDiff >= 0 ? "text-green-700" : "text-red-700"
-                    }`}
-                  >
-                    {periodDiff > 0 ? "+" : ""}
-                    {money(periodDiff)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3 bg-gray-50 p-4 rounded-xl border">
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-1">
-                    <span className="text-green-700">الداخل</span>
-                    <span>{money(periodIncome)}</span>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5">
+                      قارن أحدث حسبة ({latestSnapshot?.title}) مع:
+                    </label>
+                    <select
+                      value={compareId}
+                      onChange={(e) => setCompareId(Number(e.target.value))}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-slate-900 focus:outline-none px-3.5 py-2.5 text-sm font-bold text-slate-800"
+                    >
+                      {snapshots.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.title} — ({formatDate(s.created_at)}) —{" "}
+                          {formatSignedMoney(s.net_amount)}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-green-600 transition-all"
-                      style={{ width: `${incomePercent}%` }}
-                    />
-                  </div>
-                </div>
 
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-1">
-                    <span className="text-red-700">الطالع</span>
-                    <span>{money(periodExpense)}</span>
-                  </div>
-                  <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-red-600 transition-all"
-                      style={{ width: `${expensePercent}%` }}
-                    />
-                  </div>
+                  {latestSnapshot && comparedSnapshot && (
+                    <div className="space-y-3 bg-slate-50 rounded-2xl p-4 border border-slate-200/70">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-semibold">
+                          الفرق في الصافي
+                        </span>
+                        <span
+                          className={`text-sm font-black ${
+                            (netChangeBetween ?? 0) >= 0
+                              ? "text-emerald-700"
+                              : "text-rose-700"
+                          }`}
+                        >
+                          {formatSignedMoney(netChangeBetween ?? 0)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200/70">
+                        <span className="text-slate-500 font-semibold">
+                          الفرق في اللي معاك
+                        </span>
+                        <span
+                          className={`font-extrabold ${
+                            (hasChangeBetween ?? 0) >= 0
+                              ? "text-emerald-700"
+                              : "text-rose-700"
+                          }`}
+                        >
+                          {formatSignedMoney(hasChangeBetween ?? 0)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200/70">
+                        <span className="text-slate-500 font-semibold">
+                          الفرق في اللي عليك
+                        </span>
+                        <span
+                          className={`font-extrabold ${
+                            (owedChangeBetween ?? 0) <= 0
+                              ? "text-emerald-700"
+                              : "text-rose-700"
+                          }`}
+                        >
+                          {formatSignedMoney(owedChangeBetween ?? 0)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
 
-            <p className="text-xs text-gray-400 mt-4">
-              عدد العمليات في الفترة: {periodTx.length}
+            <p className="text-xs text-slate-400 mt-4">
+              إجمالي الحسابات المحفوظة: {snapshots.length}
             </p>
           </section>
         </div>
 
-        <section className="bg-white p-5 rounded-2xl border space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-bold">حركات الدرج والكاش</h2>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setChannelFilter("all")}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold border ${
-                  channelFilter === "all"
-                    ? "bg-[#173B35] text-white border-[#173B35]"
-                    : "bg-white text-gray-700"
-                }`}
-              >
-                الكل
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setChannelFilter("cash")}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border ${
-                  channelFilter === "cash"
-                    ? "bg-emerald-700 text-white border-emerald-700"
-                    : "bg-white text-gray-700"
-                }`}
-              >
-                <Banknote className="w-4 h-4" />
-                حركات الدرج
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setChannelFilter("vodafone")}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border ${
-                  channelFilter === "vodafone"
-                    ? "bg-rose-700 text-white border-rose-700"
-                    : "bg-white text-gray-700"
-                }`}
-              >
-                <Smartphone className="w-4 h-4" />
-                حركات الكاش
-              </button>
+        {/* سجل الحسابات المحفوظة */}
+        <section className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <History className="w-5 h-5 text-slate-700" />
+              <h2 className="text-lg font-extrabold text-slate-900">
+                الحسابات المحفوظة (السجل)
+              </h2>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 p-4 rounded-xl border">
-            <div className="bg-white p-4 rounded-xl border border-emerald-100 space-y-2">
-              <p className="text-xs font-bold text-emerald-800">الدرج</p>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-600">الداخل (+)</span>
-                <span className="font-extrabold text-green-700">
-                  {money(totalCashIncome)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-600">الطالع (-)</span>
-                <span className="font-extrabold text-red-700">
-                  {money(totalCashExpense)}
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl border border-rose-100 space-y-2">
-              <p className="text-xs font-bold text-rose-800">الكاش</p>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-600">الداخل (+)</span>
-                <span className="font-extrabold text-green-700">
-                  {money(totalVodafoneIncome)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-600">الطالع (-)</span>
-                <span className="font-extrabold text-red-700">
-                  {money(totalVodafoneExpense)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="relative">
-            <Search className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="ابحث بملاحظة أو بمبلغ..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full border rounded-xl pr-9 pl-3 py-2 text-sm"
-            />
-          </div>
-
-          {visibleTransactions.length === 0 ? (
-            <p className="text-sm text-gray-500 py-6 text-center">
-              لا توجد حركات مطابقة للفلترة الحالية.
+          {snapshots.length === 0 ? (
+            <p className="text-sm text-slate-500 py-8 text-center">
+              لا توجد حسابات محفوظة بعد. ابدأ بإدخال الأرقام وحفظ أول حسبة.
             </p>
           ) : (
-            <div className="divide-y">
-              {visibleTransactions.map((tx) => (
-                <div
-                  key={tx.id}
-                  className="py-3 flex items-center justify-between gap-3"
-                >
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                          tx.type === "income"
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {snapshots.map((item) => {
+                const isNegative = item.net_amount < 0;
+                const isPositive = item.net_amount > 0;
+
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200/90 bg-slate-50/50 hover:bg-white p-4 transition shadow-2xs flex flex-col justify-between gap-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-base font-extrabold text-slate-900">
+                          {item.title || "حسبة محفوظة"}
+                        </h3>
+                        <p className="inline-flex items-center gap-1.5 text-xs text-slate-400 mt-1">
+                          <Calendar className="w-3.5 h-3.5" />
+                          {formatDate(item.created_at)}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(item.id)}
+                        title="حذف الحسبة"
+                        className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
                       >
-                        {tx.type === "income" ? "داخل" : "طالع"}
-                      </span>
-
-                      <span className="text-xs text-gray-700 font-bold">
-                        {channelLabel(tx.account)}
-                      </span>
-
-                      <span className="text-xs text-gray-400">
-                        {new Date(tx.date).toLocaleString("ar-EG")}
-                      </span>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
 
-                    {tx.description && (
-                      <p className="text-sm text-gray-700 mt-1">
-                        {tx.description}
-                      </p>
-                    )}
-                  </div>
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/70 text-xs">
+                      <div className="bg-white rounded-xl p-2.5 border border-slate-100">
+                        <span className="text-slate-400 block">معاك</span>
+                        <span className="font-extrabold text-emerald-700 mt-0.5 block">
+                          {formatMoney(item.has_amount)}
+                        </span>
+                      </div>
 
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`text-sm font-extrabold ${
-                        tx.type === "income" ? "text-green-700" : "text-red-700"
-                      }`}
-                    >
-                      {tx.type === "income" ? "+" : "-"}
-                      {money(tx.amount)}
-                    </span>
+                      <div className="bg-white rounded-xl p-2.5 border border-slate-100">
+                        <span className="text-slate-400 block">عليك</span>
+                        <span className="font-extrabold text-rose-700 mt-0.5 block">
+                          {formatMoney(item.owed_amount)}
+                        </span>
+                      </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTransaction(tx)}
-                      title="حذف العملية"
-                      className="text-gray-400 hover:text-red-600 p-1"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <div
+                        className={`rounded-xl p-2.5 border ${
+                          isNegative
+                            ? "bg-rose-50/80 border-rose-100"
+                            : isPositive
+                            ? "bg-emerald-50/80 border-emerald-100"
+                            : "bg-slate-100/80 border-slate-200"
+                        }`}
+                      >
+                        <span className="text-slate-500 block">النتيجة</span>
+                        <span
+                          className={`font-black mt-0.5 block ${
+                            isNegative
+                              ? "text-rose-700"
+                              : isPositive
+                              ? "text-emerald-700"
+                              : "text-slate-700"
+                          }`}
+                        >
+                          {formatSignedMoney(item.net_amount)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
